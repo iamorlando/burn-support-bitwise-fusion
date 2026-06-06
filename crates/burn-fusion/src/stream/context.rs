@@ -781,7 +781,7 @@ impl RelativeOps for IntOperationIr {
             IntOperationIr::BitwiseAndScalar(desc) => {
                 IntOperationIr::BitwiseAndScalar(ScalarOpIr {
                     lhs: desc.lhs.to_relative(converter),
-                    rhs: desc.rhs,
+                    rhs: desc.rhs.to_relative(converter),
                     out: desc.out.to_relative(converter),
                 })
             }
@@ -792,7 +792,7 @@ impl RelativeOps for IntOperationIr {
             }),
             IntOperationIr::BitwiseOrScalar(desc) => IntOperationIr::BitwiseOrScalar(ScalarOpIr {
                 lhs: desc.lhs.to_relative(converter),
-                rhs: desc.rhs,
+                rhs: desc.rhs.to_relative(converter),
                 out: desc.out.to_relative(converter),
             }),
             IntOperationIr::BitwiseXor(desc) => IntOperationIr::BitwiseXor(BinaryOpIr {
@@ -803,7 +803,7 @@ impl RelativeOps for IntOperationIr {
             IntOperationIr::BitwiseXorScalar(desc) => {
                 IntOperationIr::BitwiseXorScalar(ScalarOpIr {
                     lhs: desc.lhs.to_relative(converter),
-                    rhs: desc.rhs,
+                    rhs: desc.rhs.to_relative(converter),
                     out: desc.out.to_relative(converter),
                 })
             }
@@ -821,7 +821,7 @@ impl RelativeOps for IntOperationIr {
             IntOperationIr::BitwiseLeftShiftScalar(desc) => {
                 IntOperationIr::BitwiseLeftShiftScalar(ScalarOpIr {
                     lhs: desc.lhs.to_relative(converter),
-                    rhs: desc.rhs,
+                    rhs: desc.rhs.to_relative(converter),
                     out: desc.out.to_relative(converter),
                 })
             }
@@ -835,7 +835,7 @@ impl RelativeOps for IntOperationIr {
             IntOperationIr::BitwiseRightShiftScalar(desc) => {
                 IntOperationIr::BitwiseRightShiftScalar(ScalarOpIr {
                     lhs: desc.lhs.to_relative(converter),
-                    rhs: desc.rhs,
+                    rhs: desc.rhs.to_relative(converter),
                     out: desc.out.to_relative(converter),
                 })
             }
