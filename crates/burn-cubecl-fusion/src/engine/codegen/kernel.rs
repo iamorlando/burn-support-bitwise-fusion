@@ -270,24 +270,16 @@ fn fuse(
             }
             FuseOp::Lower(op) => lower::<E, N>(inputs, outputs, locals, pos, op, config),
             FuseOp::LowerEqual(op) => lower_equal::<E, N>(inputs, outputs, locals, pos, op, config),
-            FuseOp::BitwiseAnd(op) => {
-                bitwise_and::<E, N>(inputs, outputs, locals, pos, op, config)
-            }
-            FuseOp::BitwiseOr(op) => {
-                bitwise_or::<E, N>(inputs, outputs, locals, pos, op, config)
-            }
-            FuseOp::BitwiseXor(op) => {
-                bitwise_xor::<E, N>(inputs, outputs, locals, pos, op, config)
-            }
+            FuseOp::BitwiseAnd(op) => bitwise_and::<E, N>(inputs, outputs, locals, pos, op, config),
+            FuseOp::BitwiseOr(op) => bitwise_or::<E, N>(inputs, outputs, locals, pos, op, config),
+            FuseOp::BitwiseXor(op) => bitwise_xor::<E, N>(inputs, outputs, locals, pos, op, config),
             FuseOp::BitwiseLeftShift(op) => {
                 bitwise_left_shift::<E, N>(inputs, outputs, locals, pos, op, config)
             }
             FuseOp::BitwiseRightShift(op) => {
                 bitwise_right_shift::<E, N>(inputs, outputs, locals, pos, op, config)
             }
-            FuseOp::BitwiseNot(op) => {
-                bitwise_not::<E, N>(inputs, outputs, locals, pos, op, config)
-            }
+            FuseOp::BitwiseNot(op) => bitwise_not::<E, N>(inputs, outputs, locals, pos, op, config),
             FuseOp::ConditionalAssign {
                 cond,
                 lhs,
@@ -491,17 +483,11 @@ fn gather<C: Numeric, N: Size>(
             _ => panic!("Input tensor isn't an input"),
         }
     };
-    let pos_indices = comptime! {
-        match indices {
-            FuseArg::Input(pos, ..) => pos,
-            _ => panic!("Indices tensor isn't an input"),
-        }
-    };
-
     let stride_input_dim = global_stride(inputs, dim, pos_input);
 
     let mut index = 0;
     let mut result = Vector::<C, N>::empty();
+    let offsets = read::<u32, N>(inputs, &*outputs, &*locals, write_pos, indices, config);
 
     if comptime![dim > 0] {
         let index_before = global_offset(
@@ -529,38 +515,15 @@ fn gather<C: Numeric, N: Size>(
         index += index_after;
     }
 
-    let index_offset = global_offset(
-        inputs,
-        outputs,
-        locals,
-        write_pos,
-        indices,
-        comptime![Some((0, config.rank))],
-        config,
-    );
-
-    // TODO: new IR to differentiate between Gather and GatherBroadcasted at comptime?
-    let stride_indices_vector = global_stride(inputs, config.rank - 1, pos_indices);
-
     if comptime![dim == config.rank - 1] {
         // Per-element indexing (along the dimension)
         #[unroll]
         for i in 0..vector_size {
-            let offset = read_input::<u32, Const<1>>(
-                inputs,
-                locals,
-                pos_indices,
-                index_offset + i * stride_indices_vector,
-                LayoutInfo::IsRef,
-                config,
-                None,
-            );
-
             let input = read_input::<C, Const<1>>(
                 inputs,
                 locals,
                 pos_input,
-                index + (offset[0] as usize * stride_input_dim),
+                index + (offsets[i] as usize * stride_input_dim),
                 LayoutInfo::IsRef,
                 config,
                 None,
@@ -572,18 +535,8 @@ fn gather<C: Numeric, N: Size>(
 
         #[unroll]
         for i in 0..vector_size {
-            let offset = read_input::<u32, Const<1>>(
-                inputs,
-                locals,
-                pos_indices,
-                index_offset + i * stride_indices_vector,
-                LayoutInfo::IsRef,
-                config,
-                None,
-            );
-
             let current_index =
-                index + (offset[0] as usize * stride_input_dim) + (i * stride_input_vector);
+                index + (offsets[i] as usize * stride_input_dim) + (i * stride_input_vector);
 
             let input = read_input::<C, Const<1>>(
                 inputs,

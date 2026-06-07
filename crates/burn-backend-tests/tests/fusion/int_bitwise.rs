@@ -1,7 +1,7 @@
 use super::*;
 use burn_fusion::inspect::{BlockKind, FusionInspector, matchers};
-use burn_tensor::backend::Backend;
 use burn_tensor::TensorData;
+use burn_tensor::backend::Backend;
 
 #[test]
 fn int_bitwise_chain_and_float_cast_fuse_into_single_kernel() {
@@ -55,10 +55,7 @@ fn int_bitwise_chain_and_float_cast_fuse_into_single_kernel() {
         );
 
         assert!(
-            block
-                .operations
-                .iter()
-                .any(matchers::is_bitwise_xor_int()),
+            block.operations.iter().any(matchers::is_bitwise_xor_int()),
             "BitwiseXor missing from fused block\n\n{tables}",
         );
         assert!(
@@ -76,24 +73,91 @@ fn int_bitwise_chain_and_float_cast_fuse_into_single_kernel() {
             "BitwiseRightShiftScalar missing from fused block\n\n{tables}",
         );
         assert!(
-            block
-                .operations
-                .iter()
-                .any(matchers::is_bitwise_not_int()),
+            block.operations.iter().any(matchers::is_bitwise_not_int()),
             "BitwiseNot missing from fused block\n\n{tables}",
         );
         assert!(
-            block
-                .operations
-                .iter()
-                .any(matchers::is_bitwise_or_int()),
+            block.operations.iter().any(matchers::is_bitwise_or_int()),
             "BitwiseOr missing from fused block\n\n{tables}",
+        );
+        assert!(
+            block.operations.iter().any(matchers::is_int_into_float()),
+            "IntoFloat missing from fused block\n\n{tables}",
         );
         assert!(
             block
                 .operations
                 .iter()
-                .any(matchers::is_int_into_float()),
+                .any(matchers::is_mul_scalar_float(dtype)),
+            "MulScalar missing from fused block\n\n{tables}",
+        );
+    });
+}
+
+#[test]
+fn gather_with_fused_local_indices_stays_in_elementwise_kernel() {
+    let stream = test_stream();
+    stream.executes(|| {
+        let device = Default::default();
+
+        let table = TestTensorInt::<2>::from_data([[10, 11], [20, 21], [30, 31]], &device);
+        TestBackend::sync(&device).unwrap();
+
+        let inspector = FusionInspector::install(stream);
+
+        let indices = TestTensorInt::<2>::full([4, 2], 1, &device);
+        let mask = TestTensorInt::<2>::full([4, 2], 1, &device);
+        let output = table
+            .gather(0, indices)
+            .bitwise_xor(mask)
+            .float()
+            .mul_scalar(0.25);
+        let dtype = output.dtype();
+        output.into_data().assert_eq(
+            &TensorData::from([[5.25_f32, 5.0], [5.25, 5.0], [5.25, 5.0], [5.25, 5.0]]),
+            false,
+        );
+        TestBackend::sync(&device).unwrap();
+
+        let reports = inspector.drain();
+        let tables = reports
+            .iter()
+            .map(|report| report.format_table())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let block = reports
+            .iter()
+            .flat_map(|report| report.blocks.iter())
+            .find(|block| block.operations.iter().any(matchers::is_gather_int()))
+            .unwrap_or_else(|| panic!("no gather fused block found\n\n{tables}"));
+
+        assert!(
+            matches!(
+                block.kind,
+                BlockKind::Fused {
+                    name: "ElementWise",
+                    ..
+                }
+            ),
+            "expected ElementWise fused block, got {:?}\n\n{tables}",
+            block.kind,
+        );
+
+        assert!(
+            block.operations.iter().any(matchers::is_full_int()),
+            "Full index op missing from fused block\n\n{tables}",
+        );
+        assert!(
+            block.operations.iter().any(matchers::is_gather_int()),
+            "Gather missing from fused block\n\n{tables}",
+        );
+        assert!(
+            block.operations.iter().any(matchers::is_bitwise_xor_int()),
+            "BitwiseXor missing from fused block\n\n{tables}",
+        );
+        assert!(
+            block.operations.iter().any(matchers::is_int_into_float()),
             "IntoFloat missing from fused block\n\n{tables}",
         );
         assert!(

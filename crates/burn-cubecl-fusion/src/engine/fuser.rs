@@ -6,8 +6,8 @@ use super::{
 use crate::engine::{codegen::ir::QuantSchemeFuse, scoring::Scoring};
 use burn_fusion::{FuserProperties, FuserStatus, OperationFuser};
 use burn_ir::{
-    BaseOperationIr, BinaryOpIr, FloatOperationIr, IntOperationIr, NumericOperationIr,
-    OperationIr, ScalarOpIr, TensorIr, UnaryOpIr,
+    BaseOperationIr, BinaryOpIr, FloatOperationIr, IntOperationIr, NumericOperationIr, OperationIr,
+    ScalarOpIr, TensorIr, UnaryOpIr,
 };
 use burn_std::{
     DType, Shape,
@@ -384,7 +384,7 @@ impl TraceOperationFuser {
 
                 self.fuser.fuse(|build| {
                     let input = build.input_indexed(&desc.tensor)?;
-                    let indices = build.input_indexed(&desc.indices)?;
+                    let indices = build.input(&desc.indices)?;
                     let output = build.output(&desc.out)?;
 
                     build.fuse_operation(FuseOp::Gather {
@@ -544,11 +544,10 @@ impl TraceOperationFuser {
             IntOperationIr::BitwiseAnd(desc) => self.fuse_binary_ops(desc, |lhs, rhs, out| {
                 FuseOp::BitwiseAnd(BinaryFuseArgs { lhs, rhs, out })
             }),
-            IntOperationIr::BitwiseAndScalar(desc) => {
-                self.fuse_scalar_ops(desc, |lhs, rhs, out| {
+            IntOperationIr::BitwiseAndScalar(desc) => self
+                .fuse_scalar_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseAnd(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
+                }),
             IntOperationIr::BitwiseOr(desc) => self.fuse_binary_ops(desc, |lhs, rhs, out| {
                 FuseOp::BitwiseOr(BinaryFuseArgs { lhs, rhs, out })
             }),
@@ -558,34 +557,29 @@ impl TraceOperationFuser {
             IntOperationIr::BitwiseXor(desc) => self.fuse_binary_ops(desc, |lhs, rhs, out| {
                 FuseOp::BitwiseXor(BinaryFuseArgs { lhs, rhs, out })
             }),
-            IntOperationIr::BitwiseXorScalar(desc) => {
-                self.fuse_scalar_ops(desc, |lhs, rhs, out| {
+            IntOperationIr::BitwiseXorScalar(desc) => self
+                .fuse_scalar_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseXor(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
+                }),
             IntOperationIr::BitwiseNot(desc) => self.fuse_unary_ops(desc, |input, out| {
                 FuseOp::BitwiseNot(UnaryFuseArgs { input, out })
             }),
-            IntOperationIr::BitwiseLeftShift(desc) => {
-                self.fuse_binary_ops(desc, |lhs, rhs, out| {
+            IntOperationIr::BitwiseLeftShift(desc) => self
+                .fuse_binary_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseLeftShift(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
-            IntOperationIr::BitwiseLeftShiftScalar(desc) => {
-                self.fuse_scalar_ops(desc, |lhs, rhs, out| {
+                }),
+            IntOperationIr::BitwiseLeftShiftScalar(desc) => self
+                .fuse_scalar_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseLeftShift(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
-            IntOperationIr::BitwiseRightShift(desc) => {
-                self.fuse_binary_ops(desc, |lhs, rhs, out| {
+                }),
+            IntOperationIr::BitwiseRightShift(desc) => self
+                .fuse_binary_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseRightShift(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
-            IntOperationIr::BitwiseRightShiftScalar(desc) => {
-                self.fuse_scalar_ops(desc, |lhs, rhs, out| {
+                }),
+            IntOperationIr::BitwiseRightShiftScalar(desc) => self
+                .fuse_scalar_ops(desc, |lhs, rhs, out| {
                     FuseOp::BitwiseRightShift(BinaryFuseArgs { lhs, rhs, out })
-                })
-            }
+                }),
             _ => false,
         }
     }
@@ -825,9 +819,9 @@ impl TryTraceFuser {
         Self {
             fuser: TraceFuser::new(settings),
             max_bindings,
-            // A good default, avoid errors with for loops over only memory
-            // bound operations.
-            max_ops: 64,
+            // Keep a compile-time guard, but allow long binding-light elementwise
+            // traces such as bitwise generation chains to stay fused.
+            max_ops: 256,
             added_ops: false,
         }
     }

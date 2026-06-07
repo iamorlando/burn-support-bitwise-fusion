@@ -330,7 +330,9 @@ pub(crate) fn emit_handle_snapshot(stream_id: StreamId, ids: impl IntoIterator<I
 pub mod matchers {
     use super::OpMatcher;
     use burn_backend::DType;
-    use burn_ir::{FloatOperationIr, IntOperationIr, NumericOperationIr, OperationIr};
+    use burn_ir::{
+        BaseOperationIr, FloatOperationIr, IntOperationIr, NumericOperationIr, OperationIr,
+    };
 
     /// Matches a float add (`a + b`) on the given dtype.
     pub fn is_add_float(dtype: DType) -> OpMatcher {
@@ -430,6 +432,16 @@ pub mod matchers {
     /// Matches an int-to-float cast.
     pub fn is_int_into_float() -> OpMatcher {
         Box::new(|op| matches!(op, OperationIr::Int(IntOperationIr::IntoFloat(_))))
+    }
+
+    /// Matches an int gather.
+    pub fn is_gather_int() -> OpMatcher {
+        Box::new(|op| matches!(op, OperationIr::BaseInt(BaseOperationIr::Gather(_))))
+    }
+
+    /// Matches an int full initialization.
+    pub fn is_full_int() -> OpMatcher {
+        Box::new(|op| matches!(op, OperationIr::NumericInt(_, NumericOperationIr::Full(_))))
     }
 
     /// Matches a float subtraction (`a - b`) on the given dtype.
