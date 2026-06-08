@@ -93,6 +93,39 @@ fn lower_triangular_correlate_fuses_producer_into_single_kernel() {
     });
 }
 
+#[test]
+fn lower_triangular_correlate_handles_large_path_grid() {
+    const PATHS: usize = 65_536;
+
+    let stream = test_stream();
+    stream.executes(|| {
+        let device = Default::default();
+        let mut values = Vec::with_capacity(PATHS * 2);
+
+        for _ in 0..PATHS {
+            values.extend_from_slice(&[1.0_f32, 2.0]);
+        }
+
+        let base = TestTensor::<2>::from_data(TensorData::new(values, [PATHS, 2]), &device);
+        let lower =
+            TestTensor::<2>::from_data(TensorData::from([[2.0_f32, 0.0], [0.5, 3.0]]), &device);
+        TestBackend::sync(&device).unwrap();
+
+        let independent = base.mul_scalar(2.0).add_scalar(1.0);
+        let output = lower_triangular_correlate(independent, lower);
+        let data = output.into_data();
+        let values = data.as_slice::<f32>().unwrap();
+        let last = (PATHS - 1) * 2;
+
+        assert_eq!(values.len(), PATHS * 2);
+        assert_eq!(values[0], 6.0);
+        assert_eq!(values[1], 16.5);
+        assert_eq!(values[last], 6.0);
+        assert_eq!(values[last + 1], 16.5);
+        TestBackend::sync(&device).unwrap();
+    });
+}
+
 fn lower_triangular_correlate(independent: TestTensor<2>, lower: TestTensor<2>) -> TestTensor<2> {
     let device = independent.device();
     let client = get_client::<InnerBackend>(&device);

@@ -18,7 +18,7 @@ use crate::{
 };
 use burn_fusion::stream::Context;
 use burn_ir::BinaryOpIr;
-use cubecl::{CubeDim, Runtime, client::ComputeClient, prelude::*};
+use cubecl::{CubeDim, Runtime, client::ComputeClient, prelude::*, server::CubeCountSelection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -172,7 +172,8 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
         let [config_read, config_write] = [&configs[0], &configs[1]];
         let shape = outputs.shape_ref(&config_write.ref_layout, config_write.rank);
         let cube_dim = CubeDim::new_1d(self.correlate.factors as u32);
-        let cube_count = CubeCount::new_1d(shape[0] as u32);
+        let cube_count =
+            CubeCountSelection::new(client, shape[0].min(u32::MAX as usize) as u32).cube_count();
         let address_type = inputs
             .required_address_type()
             .max(outputs.required_address_type());
@@ -215,7 +216,7 @@ fn lower_triangular_correlate_fused(
     let mut locals_read = init_locals(inputs, outputs, config_read);
     let mut locals_write = init_locals(inputs, outputs, config_write);
     let paths = ref_shape(&locals_write, 0);
-    let p = CUBE_POS_X as usize;
+    let p = CUBE_POS;
     let j = UNIT_POS_X as usize;
 
     let mut independent_row = SharedMemory::<f32>::new(factors);
