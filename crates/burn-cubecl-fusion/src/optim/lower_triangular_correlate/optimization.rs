@@ -2,7 +2,7 @@ use crate::{
     CubeFusionHandle, FallbackOperation,
     engine::{
         codegen::{
-            io::{input_as_slice, ref_len, ref_shape},
+            io::{input_as_slice, ref_shape},
             ir::{
                 FuseArg, FuseBlockConfig, GlobalArgs, GlobalArgsLaunch, multi_block_variables_init,
             },
@@ -51,6 +51,7 @@ pub struct FusedLowerTriangularCorrelate {
     pub(crate) independent: FuseArg,
     pub(crate) lower: FuseArg,
     pub(crate) output: FuseArg,
+    pub(crate) factors: usize,
     pub(crate) op: BinaryOpIr,
 }
 
@@ -170,7 +171,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
     ) -> Result<(), Self::Error> {
         let [config_read, config_write] = [&configs[0], &configs[1]];
         let shape = outputs.shape_ref(&config_write.ref_layout, config_write.rank);
-        let working_units = shape.iter().product::<usize>();
+        let working_units = shape[0];
         let cube_dim = CubeDim::new(client, working_units);
         let cube_count = calculate_cube_count_elemwise(client, working_units, cube_dim);
         let address_type = inputs
@@ -190,6 +191,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
                 self.correlate.independent.clone(),
                 self.correlate.lower.clone(),
                 self.correlate.output.clone(),
+                self.correlate.factors,
             );
         }
 
@@ -206,24 +208,29 @@ fn lower_triangular_correlate_fused(
     #[comptime] independent: FuseArg,
     #[comptime] lower: FuseArg,
     #[comptime] output: FuseArg,
+    #[comptime] factors: usize,
 ) {
     multi_block_variables_init(config_read, &mut outputs.variables);
     multi_block_variables_init(config_write, &mut outputs.variables);
 
     let mut locals_read = init_locals(inputs, outputs, config_read);
     let mut locals_write = init_locals(inputs, outputs, config_write);
-    let len = ref_len(inputs, outputs, &locals_write, config_write);
+    let paths = ref_shape(&locals_write, 0);
     let pos = ABSOLUTE_POS;
 
-    if pos < len {
-        let factors = ref_shape(&locals_write, 1);
-        let p = pos / factors;
-        let j = pos % factors;
-        let mut acc = 0.0f32;
+    if pos < paths {
+        let p = pos;
+        let mut acc = Array::new(factors);
         let lower_values = lower_as_slice(inputs, lower);
 
+        let mut j = 0;
+        while j < factors {
+            acc[j] = 0.0f32;
+            j += 1;
+        }
+
         let mut k = 0;
-        while k <= j {
+        while k < factors {
             let read_pos = p * factors + k;
             let z = fuse_on_read::<f32, Const<1>>(
                 inputs,
@@ -237,25 +244,37 @@ fn lower_triangular_correlate_fused(
                 },
                 config_read,
             )[0][0];
-            let l = lower_values[j * factors + k];
-            acc += z * l;
+
+            j = k;
+            while j < factors {
+                let l = lower_values[j * factors + k];
+                acc[j] += z * l;
+                j += 1;
+            }
+
             k += 1;
         }
 
-        let mut values = Registry::<FuseArg, Vector<f32, Const<1>>>::new();
-        let mut args = comptime![Vec::<FuseArg>::new()];
-        values.insert(comptime![output.clone()], Vector::new(acc));
-        comptime![args.push(output.clone())];
+        j = 0;
+        while j < factors {
+            let write_pos = p * factors + j;
+            let mut values = Registry::<FuseArg, Vector<f32, Const<1>>>::new();
+            let mut args = comptime![Vec::<FuseArg>::new()];
+            values.insert(comptime![output.clone()], Vector::new(acc[j]));
+            comptime![args.push(output.clone())];
 
-        fuse_on_write::<f32, Const<1>>(
-            inputs,
-            outputs,
-            &mut locals_write,
-            pos,
-            values,
-            args,
-            config_write,
-        );
+            fuse_on_write::<f32, Const<1>>(
+                inputs,
+                outputs,
+                &mut locals_write,
+                write_pos,
+                values,
+                args,
+                config_write,
+            );
+
+            j += 1;
+        }
     }
 }
 

@@ -117,6 +117,7 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             independent,
             lower,
             output,
+            factors: op.lhs.shape[1],
             op: op.clone(),
         });
         self.fuser_read_fallback.close();
