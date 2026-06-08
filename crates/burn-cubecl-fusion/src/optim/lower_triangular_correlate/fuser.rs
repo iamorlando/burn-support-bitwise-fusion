@@ -202,14 +202,16 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for LowerTriangularCorrelat
     }
 
     fn properties(&self) -> FuserProperties {
-        FuserProperties {
-            ready: self.correlate.is_some(),
-            score: if self.correlate.is_some() {
-                2_000 + self.len_stream as u64
-            } else {
-                0
-            },
+        let mut properties = self.fuser.properties();
+        properties.ready = self.correlate.is_some();
+
+        if self.correlate.is_some() {
+            // The custom kernel removes the producer output write, the correlate input read,
+            // and the extra kernel launch that would exist at the boundary.
+            properties.score = properties.score.saturating_add(210);
         }
+
+        properties
     }
 
     fn len(&self) -> usize {
