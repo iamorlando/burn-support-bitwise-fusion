@@ -193,7 +193,11 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
             });
         }
 
-        let cube_dim = CubeDim::new_1d(factors as u32);
+        let cube_lanes = factors
+            .next_power_of_two()
+            .min(max_factor_lanes)
+            .max(factors);
+        let cube_dim = CubeDim::new_1d(cube_lanes as u32);
         let cube_count =
             CubeCountSelection::new(client, paths.min(u32::MAX as usize) as u32).cube_count();
         let address_type = inputs
