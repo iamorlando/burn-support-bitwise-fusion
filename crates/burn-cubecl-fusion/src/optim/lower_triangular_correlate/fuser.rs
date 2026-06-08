@@ -16,8 +16,6 @@ pub struct LowerTriangularCorrelateFuser<R: Runtime> {
     fuser: TraceOperationFuser,
     fuser_read_fallback: TraceOperationFuser,
     device: R::Device,
-    max_factor_lanes: usize,
-    max_shared_f32_values: usize,
     correlate: Option<FusedLowerTriangularCorrelate>,
     len_stream: usize,
     fallback_pos: usize,
@@ -29,8 +27,6 @@ impl<R: Runtime> Clone for LowerTriangularCorrelateFuser<R> {
             fuser: self.fuser.clone(),
             fuser_read_fallback: self.fuser_read_fallback.clone(),
             device: self.device.clone(),
-            max_factor_lanes: self.max_factor_lanes,
-            max_shared_f32_values: self.max_shared_f32_values,
             correlate: self.correlate.clone(),
             len_stream: self.len_stream,
             fallback_pos: self.fallback_pos,
@@ -43,12 +39,6 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
         let client = R::client(&device);
         let hardware = &client.properties().hardware;
         let max_bindings = hardware.max_bindings;
-        let max_factor_lanes = hardware
-            .max_units_per_cube
-            .min(hardware.max_cube_dim.0)
-            .try_into()
-            .unwrap_or(usize::MAX);
-        let max_shared_f32_values = hardware.max_shared_memory_size / core::mem::size_of::<f32>();
         let settings_read = FuseSettings {
             inplace: true,
             ref_layout: RefLayoutSetting::OnlyContiguous,
@@ -62,8 +52,6 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             fuser: TraceOperationFuser::new(max_bindings, settings_read),
             fuser_read_fallback: TraceOperationFuser::new(max_bindings, settings_fallback),
             device,
-            max_factor_lanes,
-            max_shared_f32_values,
             correlate: None,
             len_stream: 0,
             fallback_pos: 0,
@@ -71,14 +59,18 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
     }
 
     fn validate(op: &BinaryOpIr) -> bool {
+        let lhs = op.lhs.shape.as_slice();
+        let rhs = op.rhs.shape.as_slice();
+        let out = op.out.shape.as_slice();
+
         op.lhs.dtype == DType::F32
             && op.rhs.dtype == DType::F32
             && op.out.dtype == DType::F32
-            && op.lhs.shape.rank() == 2
-            && op.rhs.shape.rank() == 2
-            && op.out.shape == op.lhs.shape
-            && op.lhs.shape[1] == op.rhs.shape[0]
-            && op.rhs.shape[0] == op.rhs.shape[1]
+            && lhs.len() == 2
+            && rhs.len() == 2
+            && out == lhs
+            && lhs[1] == rhs[0]
+            && rhs[0] == rhs[1]
     }
 
     fn on_elemwise_read(&mut self, operation: &OperationIr) {
@@ -108,8 +100,7 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             return;
         }
 
-        let factors = op.lhs.shape[1];
-        if factors == 0 || factors > self.max_factor_lanes || factors > self.max_shared_f32_values {
+        if op.lhs.shape.as_slice()[1] == 0 {
             self.fuser.close();
             self.fuser_read_fallback.close();
             return;
@@ -137,7 +128,6 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             independent,
             lower,
             output,
-            factors,
             op: op.clone(),
         });
         self.fuser_read_fallback.close();

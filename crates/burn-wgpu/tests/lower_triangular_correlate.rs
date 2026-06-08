@@ -126,6 +126,33 @@ fn lower_triangular_correlate_handles_large_path_grid() {
     });
 }
 
+#[test]
+fn lower_triangular_correlate_matches_factor_three_reference() {
+    let stream = test_stream();
+    stream.executes(|| {
+        let device = Default::default();
+
+        let base = TestTensor::<2>::from_data(
+            TensorData::from([[1.0_f32, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            &device,
+        );
+        let lower = TestTensor::<2>::from_data(
+            TensorData::from([[1.0_f32, 0.0, 0.0], [0.5, 2.0, 0.0], [-1.0, 0.25, 3.0]]),
+            &device,
+        );
+        TestBackend::sync(&device).unwrap();
+
+        let independent = base.mul_scalar(2.0).add_scalar(1.0);
+        let output = lower_triangular_correlate(independent, lower);
+
+        output.into_data().assert_eq(
+            &TensorData::from([[3.0_f32, 11.5, 19.25], [9.0, 26.5, 32.75]]),
+            false,
+        );
+        TestBackend::sync(&device).unwrap();
+    });
+}
+
 fn lower_triangular_correlate(independent: TestTensor<2>, lower: TestTensor<2>) -> TestTensor<2> {
     let device = independent.device();
     let client = get_client::<InnerBackend>(&device);

@@ -18,7 +18,10 @@ use crate::{
 };
 use burn_fusion::stream::Context;
 use burn_ir::BinaryOpIr;
-use cubecl::{CubeDim, Runtime, client::ComputeClient, prelude::*, server::CubeCountSelection};
+use cubecl::{
+    CubeDim, Runtime, backtrace::BackTrace, client::ComputeClient, prelude::*,
+    server::CubeCountSelection,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -51,7 +54,6 @@ pub struct FusedLowerTriangularCorrelate {
     pub(crate) independent: FuseArg,
     pub(crate) lower: FuseArg,
     pub(crate) output: FuseArg,
-    pub(crate) factors: usize,
     pub(crate) op: BinaryOpIr,
 }
 
@@ -171,9 +173,29 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
     ) -> Result<(), Self::Error> {
         let [config_read, config_write] = [&configs[0], &configs[1]];
         let shape = outputs.shape_ref(&config_write.ref_layout, config_write.rank);
-        let cube_dim = CubeDim::new_1d(self.correlate.factors as u32);
+        let paths = shape[0];
+        let factors = shape[1];
+        let hardware = &client.properties().hardware;
+        let max_factor_lanes = hardware
+            .max_units_per_cube
+            .min(hardware.max_cube_dim.0)
+            .try_into()
+            .unwrap_or(usize::MAX);
+        let max_shared_f32_values = hardware.max_shared_memory_size / core::mem::size_of::<f32>();
+
+        if factors == 0 || factors > max_factor_lanes || factors > max_shared_f32_values {
+            return Err(LaunchError::Unknown {
+                reason: format!(
+                    "lower triangular correlate factors={factors} exceeds device limits \
+                     max_units_per_cube={max_factor_lanes} max_shared_f32_values={max_shared_f32_values}"
+                ),
+                backtrace: BackTrace::capture(),
+            });
+        }
+
+        let cube_dim = CubeDim::new_1d(factors as u32);
         let cube_count =
-            CubeCountSelection::new(client, shape[0].min(u32::MAX as usize) as u32).cube_count();
+            CubeCountSelection::new(client, paths.min(u32::MAX as usize) as u32).cube_count();
         let address_type = inputs
             .required_address_type()
             .max(outputs.required_address_type());
@@ -191,7 +213,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
                 self.correlate.independent.clone(),
                 self.correlate.lower.clone(),
                 self.correlate.output.clone(),
-                self.correlate.factors,
+                factors,
             );
         }
 
