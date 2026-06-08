@@ -16,6 +16,8 @@ pub struct LowerTriangularCorrelateFuser<R: Runtime> {
     fuser: TraceOperationFuser,
     fuser_read_fallback: TraceOperationFuser,
     device: R::Device,
+    max_factor_lanes: usize,
+    max_shared_f32_values: usize,
     correlate: Option<FusedLowerTriangularCorrelate>,
     len_stream: usize,
     fallback_pos: usize,
@@ -27,6 +29,8 @@ impl<R: Runtime> Clone for LowerTriangularCorrelateFuser<R> {
             fuser: self.fuser.clone(),
             fuser_read_fallback: self.fuser_read_fallback.clone(),
             device: self.device.clone(),
+            max_factor_lanes: self.max_factor_lanes,
+            max_shared_f32_values: self.max_shared_f32_values,
             correlate: self.correlate.clone(),
             len_stream: self.len_stream,
             fallback_pos: self.fallback_pos,
@@ -37,7 +41,14 @@ impl<R: Runtime> Clone for LowerTriangularCorrelateFuser<R> {
 impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
     pub fn new(device: R::Device) -> Self {
         let client = R::client(&device);
-        let max_bindings = client.properties().hardware.max_bindings;
+        let hardware = &client.properties().hardware;
+        let max_bindings = hardware.max_bindings;
+        let max_factor_lanes = hardware
+            .max_units_per_cube
+            .min(hardware.max_cube_dim.0)
+            .try_into()
+            .unwrap_or(usize::MAX);
+        let max_shared_f32_values = hardware.max_shared_memory_size / core::mem::size_of::<f32>();
         let settings_read = FuseSettings {
             inplace: true,
             ref_layout: RefLayoutSetting::OnlyContiguous,
@@ -51,6 +62,8 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             fuser: TraceOperationFuser::new(max_bindings, settings_read),
             fuser_read_fallback: TraceOperationFuser::new(max_bindings, settings_fallback),
             device,
+            max_factor_lanes,
+            max_shared_f32_values,
             correlate: None,
             len_stream: 0,
             fallback_pos: 0,
@@ -95,6 +108,13 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             return;
         }
 
+        let factors = op.lhs.shape[1];
+        if factors == 0 || factors > self.max_factor_lanes || factors > self.max_shared_f32_values {
+            self.fuser.close();
+            self.fuser_read_fallback.close();
+            return;
+        }
+
         let settings_write = FuseSettings {
             inplace: false,
             output_shape_updates: false,
@@ -117,7 +137,7 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
             independent,
             lower,
             output,
-            factors: op.lhs.shape[1],
+            factors,
             op: op.clone(),
         });
         self.fuser_read_fallback.close();

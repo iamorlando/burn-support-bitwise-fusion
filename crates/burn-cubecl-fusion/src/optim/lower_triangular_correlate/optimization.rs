@@ -18,7 +18,7 @@ use crate::{
 };
 use burn_fusion::stream::Context;
 use burn_ir::BinaryOpIr;
-use cubecl::{CubeDim, Runtime, calculate_cube_count_elemwise, client::ComputeClient, prelude::*};
+use cubecl::{CubeDim, Runtime, client::ComputeClient, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -171,9 +171,8 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
     ) -> Result<(), Self::Error> {
         let [config_read, config_write] = [&configs[0], &configs[1]];
         let shape = outputs.shape_ref(&config_write.ref_layout, config_write.rank);
-        let working_units = shape[0];
-        let cube_dim = CubeDim::new(client, working_units);
-        let cube_count = calculate_cube_count_elemwise(client, working_units, cube_dim);
+        let cube_dim = CubeDim::new_1d(self.correlate.factors as u32);
+        let cube_count = CubeCount::new_1d(shape[0] as u32);
         let address_type = inputs
             .required_address_type()
             .max(outputs.required_address_type());
@@ -216,65 +215,54 @@ fn lower_triangular_correlate_fused(
     let mut locals_read = init_locals(inputs, outputs, config_read);
     let mut locals_write = init_locals(inputs, outputs, config_write);
     let paths = ref_shape(&locals_write, 0);
-    let pos = ABSOLUTE_POS;
+    let p = CUBE_POS_X as usize;
+    let j = UNIT_POS_X as usize;
 
-    if pos < paths {
-        let p = pos;
-        let mut acc = Array::new(factors);
+    let mut independent_row = SharedMemory::<f32>::new(factors);
+
+    if p < paths && j < factors {
+        let read_pos = p * factors + j;
+        independent_row[j] = fuse_on_read::<f32, Const<1>>(
+            inputs,
+            outputs,
+            &mut locals_read,
+            read_pos,
+            comptime! {
+                let mut sequence = Sequence::new();
+                sequence.push(independent.clone());
+                sequence
+            },
+            config_read,
+        )[0][0];
+    }
+
+    sync_cube();
+
+    if p < paths && j < factors {
         let lower_values = lower_as_slice(inputs, lower);
-
-        let mut j = 0;
-        while j < factors {
-            acc[j] = 0.0f32;
-            j += 1;
-        }
-
+        let mut acc = 0.0f32;
         let mut k = 0;
-        while k < factors {
-            let read_pos = p * factors + k;
-            let z = fuse_on_read::<f32, Const<1>>(
-                inputs,
-                outputs,
-                &mut locals_read,
-                read_pos,
-                comptime! {
-                    let mut sequence = Sequence::new();
-                    sequence.push(independent.clone());
-                    sequence
-                },
-                config_read,
-            )[0][0];
-
-            j = k;
-            while j < factors {
-                let l = lower_values[j * factors + k];
-                acc[j] += z * l;
-                j += 1;
-            }
-
+        while k <= j {
+            let l = lower_values[j * factors + k];
+            acc += independent_row[k] * l;
             k += 1;
         }
 
-        j = 0;
-        while j < factors {
-            let write_pos = p * factors + j;
-            let mut values = Registry::<FuseArg, Vector<f32, Const<1>>>::new();
-            let mut args = comptime![Vec::<FuseArg>::new()];
-            values.insert(comptime![output.clone()], Vector::new(acc[j]));
-            comptime![args.push(output.clone())];
+        let write_pos = p * factors + j;
+        let mut values = Registry::<FuseArg, Vector<f32, Const<1>>>::new();
+        let mut args = comptime![Vec::<FuseArg>::new()];
+        values.insert(comptime![output.clone()], Vector::new(acc));
+        comptime![args.push(output.clone())];
 
-            fuse_on_write::<f32, Const<1>>(
-                inputs,
-                outputs,
-                &mut locals_write,
-                write_pos,
-                values,
-                args,
-                config_write,
-            );
-
-            j += 1;
-        }
+        fuse_on_write::<f32, Const<1>>(
+            inputs,
+            outputs,
+            &mut locals_write,
+            write_pos,
+            values,
+            args,
+            config_write,
+        );
     }
 }
 
