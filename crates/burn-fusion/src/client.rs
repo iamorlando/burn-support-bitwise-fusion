@@ -346,6 +346,21 @@ where
             .unwrap()
     }
 
+    /// Resolve the given float tensor to a primitive tensor for an external GPU read.
+    pub fn resolve_tensor_float_external_read<B>(
+        &self,
+        tensor: FusionTensor<R>,
+    ) -> B::FloatTensorPrimitive
+    where
+        B: FusionBackend<FusionRuntime = R>,
+    {
+        let stream = tensor.stream;
+        let tensor = tensor.into_ir();
+        self.server
+            .submit_blocking(move |server| server.read_float::<B>(tensor, stream))
+            .unwrap()
+    }
+
     /// Resolve the given int tensor to a primitive tensor.
     pub fn resolve_tensor_int<B>(&self, tensor: FusionTensor<R>) -> B::IntTensorPrimitive
     where
