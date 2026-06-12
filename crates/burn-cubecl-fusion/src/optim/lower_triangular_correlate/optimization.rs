@@ -19,7 +19,8 @@ use crate::{
 use burn_fusion::stream::Context;
 use burn_ir::BinaryOpIr;
 use cubecl::{
-    CubeDim, Runtime, backtrace::BackTrace, client::ComputeClient, prelude::*, server::CubeCount,
+    CubeDim, Runtime, backtrace::BackTrace, client::ComputeClient, prelude::*,
+    server::CubeCountSelection,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -201,7 +202,8 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
             .min(max_factor_lanes)
             .max(factors);
         let cube_dim = CubeDim::new_1d(cube_lanes as u32);
-        let cube_count = CubeCount::new_1d(paths.min(u32::MAX as usize) as u32);
+        let cube_count =
+            CubeCountSelection::new(client, paths.min(u32::MAX as usize) as u32).cube_count();
         let address_type = inputs
             .required_address_type()
             .max(outputs.required_address_type());
