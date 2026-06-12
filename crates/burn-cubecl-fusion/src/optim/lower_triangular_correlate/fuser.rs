@@ -42,7 +42,7 @@ impl<R: Runtime> LowerTriangularCorrelateFuser<R> {
         let settings_read = FuseSettings {
             inplace: true,
             ref_layout: RefLayoutSetting::OnlyContiguous,
-            broadcast: false,
+            broadcast: true,
             output_shape_updates: true,
             vectorization: VectorizationSetting::Deactivated,
         };

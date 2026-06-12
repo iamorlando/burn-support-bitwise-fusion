@@ -19,8 +19,7 @@ use crate::{
 use burn_fusion::stream::Context;
 use burn_ir::BinaryOpIr;
 use cubecl::{
-    CubeDim, Runtime, backtrace::BackTrace, client::ComputeClient, prelude::*,
-    server::CubeCountSelection,
+    CubeDim, Runtime, backtrace::BackTrace, client::ComputeClient, prelude::*, server::CubeCount,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -197,9 +196,15 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
             .next_power_of_two()
             .min(max_factor_lanes)
             .max(factors);
-        let cube_dim = CubeDim::new_1d(cube_lanes as u32);
+        let max_path_lanes = (hardware.max_units_per_cube as usize)
+            .saturating_div(cube_lanes)
+            .min(hardware.max_cube_dim.1 as usize)
+            .min(max_shared_f32_values.saturating_div(factors))
+            .max(1);
+        let paths_per_cube = paths.min(max_path_lanes).max(1);
+        let cube_dim = CubeDim::new_2d(cube_lanes as u32, paths_per_cube as u32);
         let cube_count =
-            CubeCountSelection::new(client, paths.min(u32::MAX as usize) as u32).cube_count();
+            CubeCount::new_1d(paths.div_ceil(paths_per_cube).min(u32::MAX as usize) as u32);
         let address_type = inputs
             .required_address_type()
             .max(outputs.required_address_type());
@@ -218,6 +223,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
                 self.correlate.lower.clone(),
                 self.correlate.output.clone(),
                 factors,
+                paths_per_cube,
             );
         }
 
@@ -235,6 +241,7 @@ fn lower_triangular_correlate_fused(
     #[comptime] lower: FuseArg,
     #[comptime] output: FuseArg,
     #[comptime] factors: usize,
+    #[comptime] paths_per_cube: usize,
 ) {
     multi_block_variables_init(config_read, &mut outputs.variables);
     multi_block_variables_init(config_write, &mut outputs.variables);
@@ -242,14 +249,15 @@ fn lower_triangular_correlate_fused(
     let mut locals_read = init_locals(inputs, outputs, config_read);
     let mut locals_write = init_locals(inputs, outputs, config_write);
     let paths = ref_shape(&locals_write, 0);
-    let p = CUBE_POS;
+    let p = CUBE_POS * paths_per_cube + UNIT_POS_Y as usize;
     let j = UNIT_POS_X as usize;
+    let local_row = UNIT_POS_Y as usize;
 
-    let mut independent_row = SharedMemory::<f32>::new(factors);
+    let mut independent_row = SharedMemory::<f32>::new(factors * paths_per_cube);
 
     if p < paths && j < factors {
         let read_pos = p * factors + j;
-        independent_row[j] = fuse_on_read::<f32, Const<1>>(
+        independent_row[local_row * factors + j] = fuse_on_read::<f32, Const<1>>(
             inputs,
             outputs,
             &mut locals_read,
@@ -269,9 +277,10 @@ fn lower_triangular_correlate_fused(
         let lower_values = lower_as_slice(inputs, lower);
         let mut acc = 0.0f32;
         let mut k = 0;
+        let row_offset = local_row * factors;
         while k <= j {
             let l = lower_values[j * factors + k];
-            acc += independent_row[k] * l;
+            acc += independent_row[row_offset + k] * l;
             k += 1;
         }
 
