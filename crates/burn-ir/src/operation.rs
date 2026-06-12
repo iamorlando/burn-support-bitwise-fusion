@@ -148,6 +148,8 @@ pub enum FloatOperationIr {
     IntoInt(CastOpIr),
     /// Operation corresponding to [matmul](burn_backend::ops::FloatTensorOps::float_matmul).
     Matmul(MatmulOpIr),
+    /// Row-wise lower-triangular correlation.
+    LowerTriangularCorrelate(BinaryOpIr),
     /// Operation corresponding to [cross](burn_backend::ops::FloatTensorOps::float_cross).
     Cross(CrossOpIr),
     /// Operation corresponding to [random](burn_backend::ops::FloatTensorOps::float_random).
@@ -2449,6 +2451,9 @@ impl FloatOperationIr {
     fn inputs(&self) -> Box<dyn Iterator<Item = &TensorIr> + '_> {
         match self {
             FloatOperationIr::Matmul(repr) => Box::new([&repr.lhs, &repr.rhs].into_iter()),
+            FloatOperationIr::LowerTriangularCorrelate(repr) => {
+                Box::new([&repr.lhs, &repr.rhs].into_iter())
+            }
             FloatOperationIr::Cross(repr) => Box::new([&repr.lhs, &repr.rhs].into_iter()),
             FloatOperationIr::Random(_repr) => Box::new([].into_iter()),
             FloatOperationIr::Exp(repr) => Box::new([&repr.input].into_iter()),
@@ -2491,6 +2496,7 @@ impl FloatOperationIr {
     fn outputs(&self) -> Box<dyn Iterator<Item = &TensorIr> + '_> {
         match self {
             FloatOperationIr::Matmul(repr) => Box::new([&repr.out].into_iter()),
+            FloatOperationIr::LowerTriangularCorrelate(repr) => Box::new([&repr.out].into_iter()),
             FloatOperationIr::Cross(repr) => Box::new([&repr.out].into_iter()),
             FloatOperationIr::Random(repr) => Box::new([&repr.out].into_iter()),
             FloatOperationIr::Exp(repr) => Box::new([&repr.out].into_iter()),
@@ -2532,6 +2538,10 @@ impl FloatOperationIr {
 
         match self {
             FloatOperationIr::Matmul(repr) => {
+                repr.lhs.mark_read_only(nodes, &mut output);
+                repr.rhs.mark_read_only(nodes, &mut output);
+            }
+            FloatOperationIr::LowerTriangularCorrelate(repr) => {
                 repr.lhs.mark_read_only(nodes, &mut output);
                 repr.rhs.mark_read_only(nodes, &mut output);
             }

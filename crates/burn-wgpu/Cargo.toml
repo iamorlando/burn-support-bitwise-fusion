@@ -50,6 +50,11 @@ burn-backend = { workspace = true, features = [
     "cubecl-wgpu",
 ] }
 
+[dev-dependencies]
+burn-fusion = { workspace = true, features = ["test-util"] }
+burn-ir = { workspace = true }
+burn-tensor = { workspace = true }
+
 
 [package.metadata.docs.rs]
 features = ["default"]

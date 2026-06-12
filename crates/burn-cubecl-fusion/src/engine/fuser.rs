@@ -217,6 +217,11 @@ impl TraceOperationFuser {
         self.fuser.fuser.input_unhandled(tensor)
     }
 
+    /// Declares an input tensor that will be read using custom scalar indexing.
+    pub fn input_indexed(&mut self, tensor: &TensorIr) -> Option<FuseArg> {
+        self.fuser.fuser.input_indexed(tensor)
+    }
+
     /// Declares an input quantized tensor argument where the kernel is responsible to load.
     ///
     /// # Returns

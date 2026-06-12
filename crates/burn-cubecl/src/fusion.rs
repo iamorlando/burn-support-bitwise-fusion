@@ -9,6 +9,9 @@ use burn_cubecl_fusion::{
     optim::{
         CubeOptimization, CubeOptimizationState,
         elemwise::{ElementWiseFuser, ElemwiseOptimization},
+        lower_triangular_correlate::{
+            LowerTriangularCorrelateFuser, LowerTriangularCorrelateOptimization,
+        },
         matmul::{MatmulFuser, MatmulOptimization},
         reduce::{ReduceFuser, ReduceOptimization},
         reduce_broadcasted::ReduceBroadcastedOptimization,
@@ -37,6 +40,10 @@ where
     ) {
         match self {
             Self::ElementWise(op) => op.execute(context),
+            Self::LowerTriangularCorrelate(op) => op.execute(context, |index| {
+                let operation = execution.operation_within_optimization(index);
+                Box::new(FallbackOperationWrapper::new(operation))
+            }),
             Self::Matmul(op) => op.execute(context, |index| {
                 let operation = execution.operation_within_optimization(index);
                 Box::new(FallbackOperationWrapper::new(operation))
@@ -60,6 +67,11 @@ where
         match state {
             CubeOptimizationState::ElementWise(state) => {
                 Self::ElementWise(ElemwiseOptimization::from_state(device, state))
+            }
+            CubeOptimizationState::LowerTriangularCorrelate(state) => {
+                Self::LowerTriangularCorrelate(LowerTriangularCorrelateOptimization::from_state(
+                    device, state,
+                ))
             }
             CubeOptimizationState::Matmul(state) => {
                 Self::Matmul(MatmulOptimization::from_state(device, state))
@@ -147,6 +159,7 @@ impl<R: CubeRuntime> FusionRuntime for FusionCubeRuntime<R> {
     fn fusers(device: R::Device) -> Vec<Box<dyn burn_fusion::OperationFuser<Self::Optimization>>> {
         vec![
             Box::new(ElementWiseFuser::new(device.clone())),
+            Box::new(LowerTriangularCorrelateFuser::new(device.clone())),
             Box::new(MatmulFuser::new(device.clone())),
             Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)),
             Box::new(ReduceBroadcastedFuser::new(device.clone())),

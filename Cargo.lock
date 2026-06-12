@@ -1318,6 +1318,8 @@ dependencies = [
  "burn-backend",
  "burn-cubecl",
  "burn-fusion",
+ "burn-ir",
+ "burn-tensor",
  "cubecl",
 ]
 
