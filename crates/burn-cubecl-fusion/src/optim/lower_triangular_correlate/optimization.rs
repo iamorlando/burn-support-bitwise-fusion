@@ -202,7 +202,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
             .min(max_shared_f32_values.saturating_div(factors))
             .max(1);
         let paths_per_cube = paths.min(max_path_lanes).max(1);
-        let cube_dim = CubeDim::new_2d(cube_lanes as u32, paths_per_cube as u32);
+        let cube_dim = CubeDim::new_1d((cube_lanes * paths_per_cube) as u32);
         let cube_count =
             CubeCount::new_1d(paths.div_ceil(paths_per_cube).min(u32::MAX as usize) as u32);
         let address_type = inputs
@@ -223,6 +223,7 @@ impl<R: Runtime> TraceRunner<R> for FusedLowerTriangularCorrelateLaunch<'_> {
                 self.correlate.lower.clone(),
                 self.correlate.output.clone(),
                 factors,
+                cube_lanes,
                 paths_per_cube,
             );
         }
@@ -241,6 +242,7 @@ fn lower_triangular_correlate_fused(
     #[comptime] lower: FuseArg,
     #[comptime] output: FuseArg,
     #[comptime] factors: usize,
+    #[comptime] cube_lanes: usize,
     #[comptime] paths_per_cube: usize,
 ) {
     multi_block_variables_init(config_read, &mut outputs.variables);
@@ -249,9 +251,10 @@ fn lower_triangular_correlate_fused(
     let mut locals_read = init_locals(inputs, outputs, config_read);
     let mut locals_write = init_locals(inputs, outputs, config_write);
     let paths = ref_shape(&locals_write, 0);
-    let p = CUBE_POS * paths_per_cube + UNIT_POS_Y as usize;
-    let j = UNIT_POS_X as usize;
-    let local_row = UNIT_POS_Y as usize;
+    let unit = UNIT_POS as usize;
+    let local_row = unit / cube_lanes;
+    let j = unit % cube_lanes;
+    let p = CUBE_POS * paths_per_cube + local_row;
 
     let mut independent_row = SharedMemory::<f32>::new(factors * paths_per_cube);
 
